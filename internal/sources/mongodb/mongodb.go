@@ -15,13 +15,13 @@
 package mongodb
 
 import (
-    "context"
-    "fmt"
+	"context"
+	"fmt"
 
-    "github.com/googleapis/genai-toolbox/internal/sources"
-    "go.mongodb.org/mongo-driver/mongo"
-    "go.mongodb.org/mongo-driver/mongo/options"
-    "go.opentelemetry.io/otel/trace"
+	"github.com/googleapis/genai-toolbox/internal/sources"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const SourceKind string = "mongodb"
@@ -30,69 +30,69 @@ const SourceKind string = "mongodb"
 var _ sources.SourceConfig = Config{}
 
 type Config struct {
-    Name     string `yaml:"name" validate:"required"`
-    Kind     string `yaml:"kind" validate:"required"`
-    URI      string `yaml:"uri" validate:"required"` // MongoDB Atlas connection URI
-    Database string `yaml:"database" validate:"required"`
+	Name     string `yaml:"name" validate:"required"`
+	Kind     string `yaml:"kind" validate:"required"`
+	Uri      string `yaml:"uri" validate:"required"` // MongoDB Atlas connection URI
+	Database string `yaml:"database" validate:"required"`
 }
 
 func (r Config) SourceConfigKind() string {
-    return SourceKind
+	return SourceKind
 }
 
 func (r Config) Initialize(ctx context.Context, tracer trace.Tracer) (sources.Source, error) {
-    client, err := initMongoDBClient(ctx, tracer, r.Name, r.URI)
-    if err != nil {
-        return nil, fmt.Errorf("Unable to create MongoDB client: %w", err)
-    }
+	client, err := initMongoDBClient(ctx, tracer, r.Name, r.Uri)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create MongoDB client: %w", err)
+	}
 
-    // Verify the connection
-    err = client.Ping(ctx, nil)
-    if err != nil {
-        return nil, fmt.Errorf("Unable to connect successfully: %w", err)
-    }
+	// Verify the connection
+	err = client.Ping(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("unable to connect successfully: %w", err)
+	}
 
-    s := &Source{
-        Name:     r.Name,
-        Kind:     SourceKind,
-        Client:   client,
-        Database: client.Database(r.Database),
-    }
-    return s, nil
+	s := &Source{
+		Name:     r.Name,
+		Kind:     SourceKind,
+		Client:   client,
+		Database: client.Database(r.Database),
+	}
+	return s, nil
 }
 
 var _ sources.Source = &Source{}
 
 type Source struct {
-    Name     string        `yaml:"name"`
-    Kind     string        `yaml:"kind"`
-    Client   *mongo.Client
-    Database *mongo.Database
+	Name     string `yaml:"name"`
+	Kind     string `yaml:"kind"`
+	Client   *mongo.Client
+	Database *mongo.Database
 }
 
 func (s *Source) SourceKind() string {
-    return SourceKind
+	return SourceKind
 }
 
 func (s *Source) MongoClient() *mongo.Client {
-    return s.Client
+	return s.Client
 }
 
 func (s *Source) DatabaseName() string {
-    return s.Database.Name()
+	return s.Database.Name()
 }
 
 func initMongoDBClient(ctx context.Context, tracer trace.Tracer, name, uri string) (*mongo.Client, error) {
-    // Start a tracing span
-    ctx, span := sources.InitConnectionSpan(ctx, tracer, SourceKind, name)
-    defer span.End()
+	// Start a tracing span
+	ctx, span := sources.InitConnectionSpan(ctx, tracer, SourceKind, name)
+	defer span.End()
 
-    // Create a new MongoDB client
-    clientOpts := options.Client().ApplyURI(uri)
-    client, err := mongo.Connect(ctx, clientOpts)
-    if err != nil {
-        return nil, fmt.Errorf("Unable to create MongoDB client: %w", err)
-    }
+	// Create a new MongoDB client
+	clientOpts := options.Client().ApplyURI(uri)
+	client, err := mongo.Connect(ctx, clientOpts)
+	if err != nil {
+		return nil, fmt.Errorf("Unable to create MongoDB client: %w", err)
+	}
 
-    return client, nil
+	return client, nil
 }
