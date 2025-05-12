@@ -339,6 +339,8 @@ steps:
     entrypoint: /bin/bash
     env:
       - "GOPATH=/gopath"
+      - "MONGODB_DATABASE=$_MONGODB_DATABASE"
+      - "MONGODB_COLLECTION=$_MONGODB_COLLECTION"
       - "SERVICE_ACCOUNT_EMAIL=$SERVICE_ACCOUNT_EMAIL"
     secretEnv: ["MONGODB_HOST", "MONGODB_USER", "MONGODB_PASS", "CLIENT_ID"]
     volumes:
@@ -434,3 +436,5 @@ substitutions:
   _DGRAPHURL: "https://play.dgraph.io"
   _COUCHBASE_BUCKET: "couchbase-bucket"
   _COUCHBASE_SCOPE: "couchbase-scope"
+  _MONGODB_DATABASE: "mongodb-database"
+  _MONGODB_COLLECTION: "mongodb-collection"
