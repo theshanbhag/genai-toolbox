@@ -24,6 +24,7 @@ type Config struct {
 	Query        map[string]any   `yaml:"query" validate:"required"`
 	AuthRequired []string         `yaml:"authRequired"`
 	Parameters   tools.Parameters `yaml:"parameters"`
+	RequestBody  string           `yaml:"requestBody"`
 }
 
 // validate interface
@@ -63,6 +64,7 @@ func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error)
 		AuthRequired: cfg.AuthRequired,
 		Client:       s.Client,
 		Database:     s.DatabaseName(),
+		RequestBody:  cfg.RequestBody,
 		manifest:     tools.Manifest{Description: cfg.Description, Parameters: cfg.Parameters.Manifest(), AuthRequired: cfg.AuthRequired},
 		mcpManifest:  mcpManifest,
 	}
@@ -82,6 +84,7 @@ type Tool struct {
 	Client      *mongo.Client
 	Database    string
 	Collection  string
+	RequestBody string
 	Query       map[string]any
 	manifest    tools.Manifest
 	mcpManifest tools.McpManifest
@@ -124,6 +127,22 @@ func (t Tool) Invoke(ctx context.Context, params tools.ParamValues) ([]any, erro
 		}
 
 		return results, nil
+
+	case "aggregate":
+		// Extract the pipeline for the aggregate operation
+		pipeline := make([]bson.M, 0)
+		filter := t.Query
+		// Apply parameters to the query
+		for key, value := range params.AsMap() {
+			pipeline = append(pipeline, bson.M{key: value})
+			filter[key] = value
+		}
+		// print filter and pipeline
+		fmt.Print(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
+		fmt.Printf("filter: %v\n", filter)
+		fmt.Printf("pipeline: %v\n", pipeline)
+		fmt.Print(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
+		return nil, fmt.Errorf("aggregate operation not implemented")
 
 	case "vectorSearch":
 		// Extract the pipeline for the aggregate operation
