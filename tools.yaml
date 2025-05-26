@@ -1,0 +1,78 @@
+sources:
+  mongo-db:
+    kind: "mongodb"
+    uri: "mongodb+srv://venkatesh:ashwin321@freetier.kxcgwh2.mongodb.net/?retryWrites=true&w=majority&appName=FreeTier"
+    database: "amazon"
+  my-pg-source:
+    kind: postgres
+    host: 127.0.0.1
+    port: 5432
+    database: my_db
+    user: ${USER_NAME}
+    password: ${PASSWORD}
+
+tools:
+  search-movie-by-name:
+    kind: "mongodb-atlas"
+    source: "mongo-db"
+    description: "Search for movies based on name."
+    collection: "products-updated"
+    operation: "find"
+    parameters:
+      - name: title
+        type: string
+        description: Name of the movie
+    query:
+      title: "$1"
+  aggregate-products:
+    kind: "mongodb-atlas"
+    source: "mongo-db"
+    description: "Run an aggregation pipeline on the movies collection."
+    collection: "products-updated"
+    operation: "vectorSearch"
+    parameters:
+      - name: indexName
+        type: string
+        description: "The name of the index to use for vector search."
+      - name: embeddings
+        type: array
+        description: A list of airline, ordered by preference.
+        items:
+          name: name
+          type: float
+          description: embeddings data
+      - name: path
+        type: string
+        description: "The path to the field to search."
+    query:
+      indexName: "$1"
+      embeddings: "$2"
+      path: "$3"
+  aggregate-data:
+    kind: "mongodb-atlas"
+    source: "mongo-db"
+    description: "Run an aggregation pipeline on the collection."
+    collection: "products-updated"
+    operation: "aggregate"
+    requestBody: |
+      {
+        "age": {{.age}},
+        "city": "{{.city}}"
+      }
+    parameters:
+      - name: age
+        description: age number
+        type: integer
+      - name: city
+        description: city string
+        type: string
+    query:
+      indexName: "$1"
+      embeddings: "$2"
+      path: "$3"
+
+toolsets:
+  my-toolset:
+    - "search-movie-by-name"
+    - "aggregate-products"
+    - "aggregate-data"
