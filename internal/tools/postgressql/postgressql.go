@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 
+	yaml "github.com/goccy/go-yaml"
 	"github.com/googleapis/genai-toolbox/internal/sources"
 	"github.com/googleapis/genai-toolbox/internal/sources/alloydbpg"
 	"github.com/googleapis/genai-toolbox/internal/sources/cloudsqlpg"
@@ -26,7 +27,21 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const ToolKind string = "postgres-sql"
+const kind string = "postgres-sql"
+
+func init() {
+	if !tools.Register(kind, newConfig) {
+		panic(fmt.Sprintf("tool kind %q already registered", kind))
+	}
+}
+
+func newConfig(ctx context.Context, name string, decoder *yaml.Decoder) (tools.ToolConfig, error) {
+	actual := Config{Name: name}
+	if err := decoder.DecodeContext(ctx, &actual); err != nil {
+		return nil, err
+	}
+	return actual, nil
+}
 
 type compatibleSource interface {
 	PostgresPool() *pgxpool.Pool
@@ -40,20 +55,21 @@ var _ compatibleSource = &postgres.Source{}
 var compatibleSources = [...]string{alloydbpg.SourceKind, cloudsqlpg.SourceKind, postgres.SourceKind}
 
 type Config struct {
-	Name         string           `yaml:"name" validate:"required"`
-	Kind         string           `yaml:"kind" validate:"required"`
-	Source       string           `yaml:"source" validate:"required"`
-	Description  string           `yaml:"description" validate:"required"`
-	Statement    string           `yaml:"statement" validate:"required"`
-	AuthRequired []string         `yaml:"authRequired"`
-	Parameters   tools.Parameters `yaml:"parameters"`
+	Name               string           `yaml:"name" validate:"required"`
+	Kind               string           `yaml:"kind" validate:"required"`
+	Source             string           `yaml:"source" validate:"required"`
+	Description        string           `yaml:"description" validate:"required"`
+	Statement          string           `yaml:"statement" validate:"required"`
+	AuthRequired       []string         `yaml:"authRequired"`
+	Parameters         tools.Parameters `yaml:"parameters"`
+	TemplateParameters tools.Parameters `yaml:"templateParameters"`
 }
 
 // validate interface
 var _ tools.ToolConfig = Config{}
 
 func (cfg Config) ToolConfigKind() string {
-	return ToolKind
+	return kind
 }
 
 func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error) {
@@ -66,25 +82,29 @@ func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error)
 	// verify the source is compatible
 	s, ok := rawS.(compatibleSource)
 	if !ok {
-		return nil, fmt.Errorf("invalid source for %q tool: source kind must be one of %q", ToolKind, compatibleSources)
+		return nil, fmt.Errorf("invalid source for %q tool: source kind must be one of %q", kind, compatibleSources)
 	}
+
+	allParameters, paramManifest, paramMcpManifest := tools.ProcessParameters(cfg.TemplateParameters, cfg.Parameters)
 
 	mcpManifest := tools.McpManifest{
 		Name:        cfg.Name,
 		Description: cfg.Description,
-		InputSchema: cfg.Parameters.McpManifest(),
+		InputSchema: paramMcpManifest,
 	}
 
 	// finish tool setup
 	t := Tool{
-		Name:         cfg.Name,
-		Kind:         ToolKind,
-		Parameters:   cfg.Parameters,
-		Statement:    cfg.Statement,
-		AuthRequired: cfg.AuthRequired,
-		Pool:         s.PostgresPool(),
-		manifest:     tools.Manifest{Description: cfg.Description, Parameters: cfg.Parameters.Manifest(), AuthRequired: cfg.AuthRequired},
-		mcpManifest:  mcpManifest,
+		Name:               cfg.Name,
+		Kind:               kind,
+		Parameters:         cfg.Parameters,
+		TemplateParameters: cfg.TemplateParameters,
+		AllParams:          allParameters,
+		Statement:          cfg.Statement,
+		AuthRequired:       cfg.AuthRequired,
+		Pool:               s.PostgresPool(),
+		manifest:           tools.Manifest{Description: cfg.Description, Parameters: paramManifest, AuthRequired: cfg.AuthRequired},
+		mcpManifest:        mcpManifest,
 	}
 	return t, nil
 }
@@ -93,10 +113,12 @@ func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error)
 var _ tools.Tool = Tool{}
 
 type Tool struct {
-	Name         string           `yaml:"name"`
-	Kind         string           `yaml:"kind"`
-	AuthRequired []string         `yaml:"authRequired"`
-	Parameters   tools.Parameters `yaml:"parameters"`
+	Name               string           `yaml:"name"`
+	Kind               string           `yaml:"kind"`
+	AuthRequired       []string         `yaml:"authRequired"`
+	Parameters         tools.Parameters `yaml:"parameters"`
+	TemplateParameters tools.Parameters `yaml:"templateParameters"`
+	AllParams          tools.Parameters `yaml:"allParams"`
 
 	Pool        *pgxpool.Pool
 	Statement   string
@@ -105,8 +127,18 @@ type Tool struct {
 }
 
 func (t Tool) Invoke(ctx context.Context, params tools.ParamValues) ([]any, error) {
-	sliceParams := params.AsSlice()
-	results, err := t.Pool.Query(ctx, t.Statement, sliceParams...)
+	paramsMap := params.AsMap()
+	newStatement, err := tools.ResolveTemplateParams(t.TemplateParameters, t.Statement, paramsMap)
+	if err != nil {
+		return nil, fmt.Errorf("unable to extract template params %w", err)
+	}
+
+	newParams, err := tools.GetParams(t.Parameters, paramsMap)
+	if err != nil {
+		return nil, fmt.Errorf("unable to extract standard params %w", err)
+	}
+	sliceParams := newParams.AsSlice()
+	results, err := t.Pool.Query(ctx, newStatement, sliceParams...)
 	if err != nil {
 		return nil, fmt.Errorf("unable to execute query: %w", err)
 	}
@@ -130,7 +162,7 @@ func (t Tool) Invoke(ctx context.Context, params tools.ParamValues) ([]any, erro
 }
 
 func (t Tool) ParseParams(data map[string]any, claims map[string]map[string]any) (tools.ParamValues, error) {
-	return tools.ParseParams(t.Parameters, data, claims)
+	return tools.ParseParams(t.AllParams, data, claims)
 }
 
 func (t Tool) Manifest() tools.Manifest {

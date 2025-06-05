@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/goccy/go-yaml"
 	"github.com/googleapis/genai-toolbox/internal/sources"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/otel/trace"
@@ -27,6 +28,20 @@ const SourceKind string = "postgres"
 
 // validate interface
 var _ sources.SourceConfig = Config{}
+
+func init() {
+	if !sources.Register(SourceKind, newConfig) {
+		panic(fmt.Sprintf("source kind %q already registered", SourceKind))
+	}
+}
+
+func newConfig(ctx context.Context, name string, decoder *yaml.Decoder) (sources.SourceConfig, error) {
+	actual := Config{Name: name}
+	if err := decoder.DecodeContext(ctx, &actual); err != nil {
+		return nil, err
+	}
+	return actual, nil
+}
 
 type Config struct {
 	Name     string `yaml:"name" validate:"required"`
@@ -45,12 +60,12 @@ func (r Config) SourceConfigKind() string {
 func (r Config) Initialize(ctx context.Context, tracer trace.Tracer) (sources.Source, error) {
 	pool, err := initPostgresConnectionPool(ctx, tracer, r.Name, r.Host, r.Port, r.User, r.Password, r.Database)
 	if err != nil {
-		return nil, fmt.Errorf("Unable to create pool: %w", err)
+		return nil, fmt.Errorf("unable to create pool: %w", err)
 	}
 
 	err = pool.Ping(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("Unable to connect successfully: %w", err)
+		return nil, fmt.Errorf("unable to connect successfully: %w", err)
 	}
 
 	s := &Source{
@@ -85,7 +100,7 @@ func initPostgresConnectionPool(ctx context.Context, tracer trace.Tracer, name, 
 	i := fmt.Sprintf("postgres://%s:%s@%s:%s/%s", user, pass, host, port, dbname)
 	pool, err := pgxpool.New(ctx, i)
 	if err != nil {
-		return nil, fmt.Errorf("Unable to create connection pool: %w", err)
+		return nil, fmt.Errorf("unable to create connection pool: %w", err)
 	}
 
 	return pool, nil

@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/goccy/go-yaml"
 	"github.com/googleapis/genai-toolbox/internal/sources"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"go.opentelemetry.io/otel/trace"
@@ -27,6 +28,20 @@ const SourceKind string = "neo4j"
 
 // validate interface
 var _ sources.SourceConfig = Config{}
+
+func init() {
+	if !sources.Register(SourceKind, newConfig) {
+		panic(fmt.Sprintf("source kind %q already registered", SourceKind))
+	}
+}
+
+func newConfig(ctx context.Context, name string, decoder *yaml.Decoder) (sources.SourceConfig, error) {
+	actual := Config{Name: name, Database: "neo4j"} // Default database
+	if err := decoder.DecodeContext(ctx, &actual); err != nil {
+		return nil, err
+	}
+	return actual, nil
+}
 
 type Config struct {
 	Name     string `yaml:"name" validate:"required"`
@@ -44,12 +59,12 @@ func (r Config) SourceConfigKind() string {
 func (r Config) Initialize(ctx context.Context, tracer trace.Tracer) (sources.Source, error) {
 	driver, err := initNeo4jDriver(ctx, tracer, r.Uri, r.User, r.Password, r.Name)
 	if err != nil {
-		return nil, fmt.Errorf("Unable to create driver: %w", err)
+		return nil, fmt.Errorf("unable to create driver: %w", err)
 	}
 
 	err = driver.VerifyConnectivity(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("Unable to connect successfully: %w", err)
+		return nil, fmt.Errorf("unable to connect successfully: %w", err)
 	}
 
 	if r.Database == "" {

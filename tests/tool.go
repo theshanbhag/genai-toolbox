@@ -16,8 +16,6 @@ package tests
 
 import (
 	"bytes"
-	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,95 +25,7 @@ import (
 	"testing"
 
 	"github.com/googleapis/genai-toolbox/internal/server/mcp"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
-
-// SetupPostgresSQLTable creates and inserts data into a table of tool
-// compatible with postgres-sql tool
-func SetupPostgresSQLTable(t *testing.T, ctx context.Context, pool *pgxpool.Pool, create_statement, insert_statement, tableName string, params []any) func(*testing.T) {
-	err := pool.Ping(ctx)
-	if err != nil {
-		t.Fatalf("unable to connect to test database: %s", err)
-	}
-
-	// Create table
-	_, err = pool.Query(ctx, create_statement)
-	if err != nil {
-		t.Fatalf("unable to create test table %s: %s", tableName, err)
-	}
-
-	// Insert test data
-	_, err = pool.Query(ctx, insert_statement, params...)
-	if err != nil {
-		t.Fatalf("unable to insert test data: %s", err)
-	}
-
-	return func(t *testing.T) {
-		// tear down test
-		_, err = pool.Exec(ctx, fmt.Sprintf("DROP TABLE %s;", tableName))
-		if err != nil {
-			t.Errorf("Teardown failed: %s", err)
-		}
-	}
-}
-
-// SetupMsSQLTable creates and inserts data into a table of tool
-// compatible with mssql-sql tool
-func SetupMsSQLTable(t *testing.T, ctx context.Context, pool *sql.DB, create_statement, insert_statement, tableName string, params []any) func(*testing.T) {
-	err := pool.PingContext(ctx)
-	if err != nil {
-		t.Fatalf("unable to connect to test database: %s", err)
-	}
-
-	// Create table
-	_, err = pool.QueryContext(ctx, create_statement)
-	if err != nil {
-		t.Fatalf("unable to create test table %s: %s", tableName, err)
-	}
-
-	// Insert test data
-	_, err = pool.QueryContext(ctx, insert_statement, params...)
-	if err != nil {
-		t.Fatalf("unable to insert test data: %s", err)
-	}
-
-	return func(t *testing.T) {
-		// tear down test
-		_, err = pool.ExecContext(ctx, fmt.Sprintf("DROP TABLE %s;", tableName))
-		if err != nil {
-			t.Errorf("Teardown failed: %s", err)
-		}
-	}
-}
-
-// SetupMySQLTable creates and inserts data into a table of tool
-// compatible with mssql-sql tool
-func SetupMySQLTable(t *testing.T, ctx context.Context, pool *sql.DB, create_statement, insert_statement, tableName string, params []any) func(*testing.T) {
-	err := pool.PingContext(ctx)
-	if err != nil {
-		t.Fatalf("unable to connect to test database: %s", err)
-	}
-
-	// Create table
-	_, err = pool.QueryContext(ctx, create_statement)
-	if err != nil {
-		t.Fatalf("unable to create test table %s: %s", tableName, err)
-	}
-
-	// Insert test data
-	_, err = pool.QueryContext(ctx, insert_statement, params...)
-	if err != nil {
-		t.Fatalf("unable to insert test data: %s", err)
-	}
-
-	return func(t *testing.T) {
-		// tear down test
-		_, err = pool.ExecContext(ctx, fmt.Sprintf("DROP TABLE %s;", tableName))
-		if err != nil {
-			t.Errorf("Teardown failed: %s", err)
-		}
-	}
-}
 
 // RunToolGet runs the tool get endpoint
 func RunToolGetTest(t *testing.T) {
@@ -255,6 +165,129 @@ func RunToolInvokeTest(t *testing.T, select_1_want, invoke_param_want string) {
 			requestHeader: map[string]string{},
 			requestBody:   bytes.NewBuffer([]byte(`{}`)),
 			isErr:         true,
+		},
+	}
+	for _, tc := range invokeTcs {
+		t.Run(tc.name, func(t *testing.T) {
+			// Send Tool invocation request
+			req, err := http.NewRequest(http.MethodPost, tc.api, tc.requestBody)
+			if err != nil {
+				t.Fatalf("unable to create request: %s", err)
+			}
+			req.Header.Add("Content-type", "application/json")
+			for k, v := range tc.requestHeader {
+				req.Header.Add(k, v)
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("unable to send request: %s", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				if tc.isErr {
+					return
+				}
+				bodyBytes, _ := io.ReadAll(resp.Body)
+				t.Fatalf("response status code is not 200, got %d: %s", resp.StatusCode, string(bodyBytes))
+			}
+
+			// Check response body
+			var body map[string]interface{}
+			err = json.NewDecoder(resp.Body).Decode(&body)
+			if err != nil {
+				t.Fatalf("error parsing response body")
+			}
+
+			got, ok := body["result"].(string)
+			if !ok {
+				t.Fatalf("unable to find result in response body")
+			}
+
+			if got != tc.want {
+				t.Fatalf("unexpected value: got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func RunToolInvokeWithTemplateParameters(t *testing.T, tableName string) {
+	select_all_want := "[{\"age\":21,\"id\":1,\"name\":\"Alex\"},{\"age\":100,\"id\":2,\"name\":\"Alice\"}]"
+	select_only_1_want := "[{\"age\":21,\"id\":1,\"name\":\"Alex\"}]"
+	select_only_names_want := "[{\"name\":\"Alex\"},{\"name\":\"Alice\"}]"
+
+	// Test tool invoke endpoint
+	invokeTcs := []struct {
+		name          string
+		api           string
+		requestHeader map[string]string
+		requestBody   io.Reader
+		want          string
+		isErr         bool
+	}{
+		{
+			name:          "invoke create-table-templateParams-tool",
+			api:           "http://127.0.0.1:5000/api/tool/create-table-templateParams-tool/invoke",
+			requestHeader: map[string]string{},
+			requestBody:   bytes.NewBuffer([]byte(fmt.Sprintf(`{"tableName": "%s", "columns":["id INT","name VARCHAR(20)","age INT"]}`, tableName))),
+			want:          "null",
+			isErr:         false,
+		},
+		{
+			name:          "invoke insert-table-templateParams-tool",
+			api:           "http://127.0.0.1:5000/api/tool/insert-table-templateParams-tool/invoke",
+			requestHeader: map[string]string{},
+			requestBody:   bytes.NewBuffer([]byte(fmt.Sprintf(`{"tableName": "%s", "columns":["id","name","age"], "values":"1, 'Alex', 21"}`, tableName))),
+			want:          "null",
+			isErr:         false,
+		},
+		{
+			name:          "invoke insert-table-templateParams-tool",
+			api:           "http://127.0.0.1:5000/api/tool/insert-table-templateParams-tool/invoke",
+			requestHeader: map[string]string{},
+			requestBody:   bytes.NewBuffer([]byte(fmt.Sprintf(`{"tableName": "%s", "columns":["id","name","age"], "values":"2, 'Alice', 100"}`, tableName))),
+			want:          "null",
+			isErr:         false,
+		},
+		{
+			name:          "invoke select-templateParams-tool",
+			api:           "http://127.0.0.1:5000/api/tool/select-templateParams-tool/invoke",
+			requestHeader: map[string]string{},
+			requestBody:   bytes.NewBuffer([]byte(fmt.Sprintf(`{"tableName": "%s"}`, tableName))),
+			want:          select_all_want,
+			isErr:         false,
+		},
+		{
+			name:          "invoke select-templateParams-combined-tool",
+			api:           "http://127.0.0.1:5000/api/tool/select-templateParams-combined-tool/invoke",
+			requestHeader: map[string]string{},
+			requestBody:   bytes.NewBuffer([]byte(fmt.Sprintf(`{"id": "1", "tableName": "%s"}`, tableName))),
+			want:          select_only_1_want,
+			isErr:         false,
+		},
+		{
+			name:          "invoke select-fields-templateParams-tool",
+			api:           "http://127.0.0.1:5000/api/tool/select-fields-templateParams-tool/invoke",
+			requestHeader: map[string]string{},
+			requestBody:   bytes.NewBuffer([]byte(fmt.Sprintf(`{"tableName": "%s", "fields":["name"]}`, tableName))),
+			want:          select_only_names_want,
+			isErr:         false,
+		},
+		{
+			name:          "invoke select-filter-templateParams-combined-tool",
+			api:           "http://127.0.0.1:5000/api/tool/select-filter-templateParams-combined-tool/invoke",
+			requestHeader: map[string]string{},
+			requestBody:   bytes.NewBuffer([]byte(fmt.Sprintf(`{"name": "Alex", "tableName": "%s", "columnFilter": "name"}`, tableName))),
+			want:          select_only_1_want,
+			isErr:         false,
+		},
+		{
+			name:          "invoke drop-table-templateParams-tool",
+			api:           "http://127.0.0.1:5000/api/tool/drop-table-templateParams-tool/invoke",
+			requestHeader: map[string]string{},
+			requestBody:   bytes.NewBuffer([]byte(fmt.Sprintf(`{"tableName": "%s"}`, tableName))),
+			want:          "null",
+			isErr:         false,
 		},
 	}
 	for _, tc := range invokeTcs {
