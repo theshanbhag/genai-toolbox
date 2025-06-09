@@ -9,7 +9,7 @@ description: >
 
 ## About
 
-[MongoDB][mongodb-docs] leading nosql database that can not only cater your operational data needs but also perform vector search.
+[MongoDB][mongodb-docs] is a leading nosql database that can not only cater your operational data needs but also perform vector search.
 
 [mongodb-docs]: https://www.mongodb.com/docs/atlas/atlas-vector-search/vector-search-overview/
 
