@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/goccy/go-yaml"
 	"github.com/googleapis/genai-toolbox/internal/sources"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -36,12 +37,13 @@ func init() {
 }
 
 func newConfig(ctx context.Context, name string, decoder *yaml.Decoder) (sources.SourceConfig, error) {
-	actual := Config{Name: name, IPType: "public"} // Default IPType
+	actual := Config{Name: name}
 	if err := decoder.DecodeContext(ctx, &actual); err != nil {
 		return nil, err
 	}
 	return actual, nil
 }
+
 type Config struct {
 	Name     string `yaml:"name" validate:"required"`
 	Kind     string `yaml:"kind" validate:"required"`
@@ -104,7 +106,7 @@ func initMongoDBClient(ctx context.Context, tracer trace.Tracer, name, uri strin
 	clientOpts := options.Client().ApplyURI(uri)
 	client, err := mongo.Connect(ctx, clientOpts)
 	if err != nil {
-		return nil, fmt.Errorf("Unable to create MongoDB client: %w", err)
+		return nil, fmt.Errorf("unable to create MongoDB client: %w", err)
 	}
 
 	return client, nil
